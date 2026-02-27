@@ -2,56 +2,82 @@
 #include <Arduino.h>
 #include "config.h"
 #include "event_bus.h"
-
+#include "sim7600_modem.h"
+#include "log_record.h"
 #if ENABLE_MQTT
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-static WiFiClient gClient;
-static PubSubClient gMqtt(gClient);
+static WiFiClient wifiClient;
+static PubSubClient mqtt(wifiClient);
 
-static void mqttReconnect() {
-  if (gMqtt.connected()) return;
-  if (WiFi.status() != WL_CONNECTED) return;
+static Client* activeClient(){
+  EventBits_t b=xEventGroupGetBits(gSysEvents);
+  if(b & EV_WIFI_UP) return &wifiClient;
+  if(b & EV_LTE_UP)  return &sim7600_client();
+  return nullptr;
+}
+static bool netUp(){ return (xEventGroupGetBits(gSysEvents) & EV_NET_UP) != 0; }
 
-  gMqtt.setServer(MQTT_HOST, MQTT_PORT);
-  Serial.printf("MQTT: connecting %s:%u\n", MQTT_HOST, MQTT_PORT);
-
-  if (gMqtt.connect(MQTT_CLIENT_ID)) {
-    Serial.println("MQTT: connected");
+static void reconnect(){
+  if(!netUp()) return;
+  Client* c=activeClient(); if(!c) return;
+  mqtt.setClient(*c);
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setBufferSize(1024);
+  if(mqtt.connected()) return;
+  if(mqtt.connect(MQTT_CLIENT_ID)){
     xEventGroupSetBits(gSysEvents, EV_MQTT_UP);
   } else {
     xEventGroupClearBits(gSysEvents, EV_MQTT_UP);
-    Serial.printf("MQTT: connect failed rc=%d\n", gMqtt.state());
   }
 }
 
-static void mqtt_task(void*) {
-  for (;;) {
-    mqttReconnect();
-    gMqtt.loop();
+static void task(void*){
+  while(!netUp()) vTaskDelay(pdMS_TO_TICKS(500));
 
-    EventBits_t b = xEventGroupGetBits(gSysEvents);
-    const bool netUp  = (b & EV_NET_UP) != 0;
-    const bool mqttUp = (b & EV_MQTT_UP) != 0;
+  uint8_t payload[1 + 32*12];
+  uint8_t count=0;
+  LogRecord32 rec{};
+  uint32_t lastStatus=0;
 
-    if (netUp && mqttUp) {
-      static uint32_t lastStatus = 0;
-      if (millis() - lastStatus > 2000) {
-        lastStatus = millis();
-        char msg[96];
-        snprintf(msg, sizeof(msg), "{\"uptime_ms\":%lu}", (unsigned long)millis());
-        gMqtt.publish(MQTT_TOPIC_STATUS, msg);
-      }
+  for(;;){
+    reconnect();
+    mqtt.loop();
+
+    if(!(xEventGroupGetBits(gSysEvents) & EV_MQTT_UP)){
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    if(millis()-lastStatus>2000){
+      lastStatus=millis();
+      EventBits_t b=xEventGroupGetBits(gSysEvents);
+      char msg[180];
+      snprintf(msg,sizeof(msg),
+        "{\"uptime_ms\":%lu,\"wifi\":%d,\"lte\":%d,\"sd\":%d,\"can1\":%d,\"can2\":%d}",
+        (unsigned long)millis(),
+        (b&EV_WIFI_UP)?1:0,(b&EV_LTE_UP)?1:0,(b&EV_SD_READY)?1:0,(b&EV_CAN1_UP)?1:0,(b&EV_CAN2_UP)?1:0
+      );
+      mqtt.publish(MQTT_TOPIC_STATUS, msg);
+    }
+
+    while(xQueueReceive(gStreamQueue, &rec, 0)==pdTRUE){
+      memcpy(&payload[1 + count*sizeof(LogRecord32)], &rec, sizeof(LogRecord32));
+      count++;
+      if(count>=12) break;
+    }
+
+    if(count>0){
+      payload[0]=count;
+      mqtt.publish(MQTT_TOPIC_LIVE, payload, 1 + count*sizeof(LogRecord32));
+      count=0;
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
-
-void start_mqtt_task() {
-  xTaskCreatePinnedToCore(mqtt_task, "mqtt", 6144, nullptr, 1, nullptr, 1);
-}
+void start_mqtt_task(){ xTaskCreatePinnedToCore(task,"mqtt",8192,nullptr,1,nullptr,1); }
 #else
-void start_mqtt_task() {}
+void start_mqtt_task(){}
 #endif

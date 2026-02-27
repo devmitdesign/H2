@@ -1,26 +1,34 @@
-ESP32 Dual-CAN Logger Skeleton (PlatformIO/Arduino)
-===================================================
+ESP32 Dual-CAN Logger + Live MQTT Stream (SIM7600 + Wi-Fi)
+=========================================================
 
-What works now:
-- CAN1 RX (ESP32 TWAI) -> queue -> SD segment files
-- CAN2 RX (MCP2515 via ACAN2515) -> queue -> SD segment files
-- ADXL345 + BMP280 periodic logging
-- GT-U7 GPS periodic logging
-- Wi-Fi connect loop
-- MQTT status publisher (skeleton)
+What this does (now):
+- Always logs LogRecord32 records to SD in append-only 2MB segments (/log/seg_XXXXXX.wip -> .bin)
+- Best-effort live stream over MQTT when Wi-Fi or LTE is available
+- Uses SIM7600 GNSS via AT+CGPS=1,1 and AT+CGPSINFO (lat/lon/alt/speed)
 
-What you must add next:
-- ACAN2515 library (if PlatformIO can't resolve it automatically)
-  Put it under lib/ACAN2515 or use Arduino IDE Library Manager.
-- Live CAN streaming "tee" (separate queue or SD-tail reader)
-- Backlog upload (read completed segment .bin and publish chunks + ACK)
-- LTE modem stack (SIM7600): PPPoS (ESP-IDF) or TinyGSM sockets
+Supabase ingestion recommendation (Trevis):
+- Keep Supabase service_role keys on the Trevis server, not on the ESP32.
+- ESP32 publishes MQTT to Trevis broker (mosquitto).
+- Trevis consumer subscribes and writes to Supabase (batching + retries).
 
-Safety:
-- If your MCP2515 module is powered at 5V, level-shift MCP->ESP32 signals (SO/MISO, INT).
-- Add hold-up energy (supercap/UPS) for best SD survivability.
+Config:
+- include/config.h:
+  - WIFI_SSID/PASS
+  - LTE_APN/USER/PASS
+  - MQTT_HOST/PORT/TOPICS
+  - MCP2515_QUARTZ_HZ (8MHz vs 16MHz)
 
-Build:
-- Edit include/config.h (Wi-Fi, pins, bitrate, oscillator)
-- pio run -t upload
-- pio device monitor
+Dependencies:
+- TinyGSM 0.12.0
+- PubSubClient
+- Adafruit sensor libs
+- ACAN2515: clone https://github.com/pierremolinaro/acan2515 into lib/ACAN2515 if needed.
+
+MQTT payload format:
+- payload[0] = N records (1..12)
+- payload[1..] = N * 32 bytes of LogRecord32 (packed)
+
+Security / TLS:
+- Start with MQTT 1883 inside VPN/private network.
+- Move to TLS later (8883). SIM7600 SSL/TLS can be firmware-dependent (SNI matters).
+  If you want stable HTTPS/TLS on-device, PPPoS is the robust long-term path.

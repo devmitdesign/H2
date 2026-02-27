@@ -1,2 +1,2 @@
- #pragma once
+#pragma once
 void start_can2_task();

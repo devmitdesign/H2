@@ -3,15 +3,23 @@
 #include "config.h"
 #include "event_bus.h"
 #include "start_tasks.h"
+#include "can1_twai.h"
+#include "can2_mcp2515.h"
+#include "sensors_task.h"
+#include "power_fail.h"
+#include "wifi_manager.h"
+#include "nextion_ui.h"
+#include "sim7600_modem.h"
+#include "mqtt_streamer.h"
 
-void setup() {
+void setup(){
   Serial.begin(SERIAL_BAUD);
   delay(200);
-  Serial.println("\n=== ESP32 Dual-CAN Logger Skeleton ===");
+  Serial.println("\\n=== ESP32 Dual-CAN Logger (SIM7600 + MQTT) ===");
 
-  if (!event_bus_init()) {
-    Serial.println("FATAL: event_bus_init failed");
-    for (;;) delay(1000);
+  if(!event_bus_init()){
+    Serial.println("FATAL: event bus init failed");
+    for(;;) delay(1000);
   }
 
   start_power_task();
@@ -27,25 +35,20 @@ void setup() {
 #if ENABLE_SENSORS
   start_sensors_task();
 #endif
-#if ENABLE_GPS_GTU7
-  start_gps_task();
-#endif
 
   start_nextion_task();
 
 #if ENABLE_WIFI
   start_wifi_task();
 #endif
-#if ENABLE_LTE_PPP
-  start_lte_task();
+#if ENABLE_MODEM_SIM7600
+  start_sim7600_task();
 #endif
 #if ENABLE_MQTT
   start_mqtt_task();
 #endif
 
-  Serial.println("Setup complete. Tasks running.");
+  Serial.println("Setup complete.");
 }
 
-void loop() {
-  vTaskDelay(pdMS_TO_TICKS(1000));
-}
+void loop(){ vTaskDelay(pdMS_TO_TICKS(1000)); }
