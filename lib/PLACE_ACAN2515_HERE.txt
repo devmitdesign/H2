@@ -1,0 +1,1 @@
+Clone https://github.com/pierremolinaro/acan2515 into lib/ACAN2515 if PlatformIO cannot find ACAN2515.

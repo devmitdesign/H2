@@ -1,0 +1,11 @@
+#pragma once
+void start_sd_writer_task();
+void start_can1_task();
+void start_can2_task();
+void start_sensors_task();
+void start_gps_task();
+void start_wifi_task();
+void start_mqtt_task();
+void start_power_task();
+void start_nextion_task();
+void start_lte_task();
